@@ -1,6 +1,6 @@
-# STASH
+# 🗄 STASH
 
-A work-in-progress key-value storage optimized for scripting
+A 🚧 work-in-progress 🚧 key-value storage optimized for scripting
 
 Stash is a tiny, zero dependency, embeddable key-value engine that trades enterprise features for **zero-config speed** inside shell scripts, Python glue, CI jobs, or anywhere a JSON file feels too clunky and Redis feels like overkill. Perfect for config blobs, session tokens, or ad-hoc data without firing up a full database. Think of it as persistent collections for your scripts.
 
