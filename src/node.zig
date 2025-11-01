@@ -103,8 +103,6 @@ pub const Node = struct {
         } else {
             const p = this.offset_pos(idx - 1);
 
-            std.debug.print("read p: {d}\n", .{p});
-
             const slice: *[2]u8 = this.data[p .. p + 2][0..2];
             return std.mem.readInt(u16, slice, .big);
         }
@@ -124,7 +122,6 @@ pub const Node = struct {
 
         const offset = this.get_offset(idx);
 
-        std.debug.print("{d}, {d}, {d}, {d}\n", .{header_size, this.child_count(), this.key_count(), offset});
         return header_size + 8 * this.child_count() + 2 * this.key_count() + offset;
     }
 
@@ -173,7 +170,7 @@ pub const Node = struct {
         while (i < self.key_count()) : (i += 1) {
             if (self.kind() == .node) {
                 var buf: [64]u8 = undefined;
-                try buffer.appendSlice(try std.fmt.bufPrint(&buf, "[0x{x}]", .{self.get_ptr(i)}));
+                try buffer.appendSlice(try std.fmt.bufPrint(&buf, "[0x{x}] ", .{self.get_ptr(i)}));
 
                 // const child = storage.node_from_ptr(self.get_ptr(i));
                 // try buffer.appendSlice(try child.to_string(allocator, storage));
@@ -186,7 +183,8 @@ pub const Node = struct {
             try buffer.appendSlice("\", ");
         }
 
-        if (self.kind() == .node) {
+        // todo where do we keep the children again?
+        if (self.kind() == .node and self.key_count() > 1) {
             var buf: [64]u8 = undefined;
             try buffer.appendSlice(try std.fmt.bufPrint(&buf, "[0x{x}]", .{self.get_ptr(i)}));
 

@@ -65,7 +65,6 @@ pub const NodeBuilder = struct {
         }
     }
 
-    // todo storage would only be needed when persisting to disk(?)
     pub fn build(self: NodeBuilder) Node {
         const page_size = 512;
         const header_size = 3;
@@ -81,32 +80,44 @@ pub const NodeBuilder = struct {
         std.mem.writeInt(u16, data[1..3], @intCast(self.kv_pairs.len), .big);
 
         // child pointers
-        for (self.child_ptrs, 0..) |child_ptr, idx| {
+        // todo not dealing with pointers yet just filling child_count + 1 with 0
+        // for (self.child_ptrs, 0..) |child_ptr, idx| {
+            // const p = header_size + 8 * idx;
+            // const slice: *[8]u8 = data[p .. p + 8][0..8];
+            // std.mem.writeInt(u64, slice, @intCast(child_ptr), .big);
+        // }
+        for (0..self.kv_pairs.len + 1) |idx| {
             const p = header_size + 8 * idx;
             const slice: *[8]u8 = data[p .. p + 8][0..8];
-            std.mem.writeInt(u64, slice, @intCast(child_ptr), .big);
+            std.mem.writeInt(u64, slice, @intCast(0), .big);
         }
 
         // offsets and kv pairs
 
-        var prev_offset: u16 = 0;
+        var offset: u16 = 0;
         for (self.kv_pairs, 0..) |kv_pair, idx| {
-            // const offset = prev_offset + KVPair.kv_header_size + KVPair.get_key_len(kv_pair) + KVPair.get_value_len(kv_pair);
-            const offset: u16 = prev_offset + @as(u16, @intCast(kv_pair.len));
 
+            // write offset for non 0th elements
             if (idx > 0) {
-                const p = header_size + 8 * self.child_ptrs.len + 2 * idx;
+                // todo child_count = self.kv_pairs.len + 1
+                const p = header_size +
+                    8 * (self.kv_pairs.len + 1) + // child count (1 more than keys)
+                    2 * (idx - 1); // idx = 0 -> offset = 0 -> not saves
+
                 const slice: *[2]u8 = data[p .. p + 2][0..2];
 
                 std.mem.writeInt(u16, slice, offset, .big);
-
-                prev_offset = offset;
             }
 
-            const kv_pos = header_size + 8 * self.child_ptrs.len + 2 * self.kv_pairs.len + offset;
+            // write kv slice
+            
+            // todo child_count = self.kv_pairs.len + 1
+            const kv_pos = header_size + 8 * (self.kv_pairs.len + 1) + 2 * self.kv_pairs.len + offset;
 
             const slice = data[kv_pos .. kv_pos + kv_pair.len];
             @memcpy(slice, kv_pair);
+
+            offset = offset + @as(u16, @intCast(kv_pair.len));
         }
 
         return Node{ .data = data };
@@ -125,30 +136,9 @@ pub const NodeBuilder = struct {
         this.kind = new_kind;
     }
 
-    // pub fn setHeaders(this: NodeBuilder, new_kind: NodeKind, new_key_count: u16) void {
-    //     this.root.data[0] = @intFromEnum(new_kind);
-    //     std.mem.writeInt(u16, this.root.data[1..3], new_key_count, .big);
-    // }
-
     pub fn setPtr(this: NodeBuilder, idx: u16, val: u64) void {
-        // const p = this.root.ptr_pos(idx);
-        // // slice the slice, so the size is known at compile time
-        // const slice: *[8]u8 = this.root.data[p .. p + 8][0..8];
-        // return std.mem.writeInt(u64, slice, val, .big);
-
         this.child_ptrs[idx] = val;
     }
-
-    // pub fn setOffset(this: NodeBuilder, idx: u16, val: u16) void {
-    //     if (idx > 0) {
-    //         const p = this.root.offset_pos(idx - 1);
-    //
-    //         std.debug.print("write p: {d}\n", .{p});
-    //
-    //         const slice: *[2]u8 = this.root.data[p .. p + 2][0..2];
-    //         return std.mem.writeInt(u16, slice, val, .big);
-    //     }
-    // }
 
     pub fn isFull(self: NodeBuilder) bool {
         return self.kv_pairs.len == 2 * NODE_SIZE - 1;
@@ -169,7 +159,7 @@ pub const NodeBuilder = struct {
         const key_len: u16 = @intCast(key.len);
         const val_len: u16 = @intCast(val.len);
 
-        const kv_slice = this.allocator.alloc(u8, 8 + 8 + key_len + val_len) catch unreachable;
+        const kv_slice = this.allocator.alloc(u8, 2 + 2 + key_len + val_len) catch unreachable;
 
         const key_len_slice: *[2]u8 = kv_slice[0..2];
         const val_len_slice: *[2]u8 = kv_slice[2..4];
@@ -272,73 +262,44 @@ pub const NodeBuilder = struct {
     // }
 };
 
-// test "set_header" {
-//     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//     const allocator = gpa.allocator();
-//
-//     const str = Storage.createInMemory(allocator, 512);
-//     const builder = NodeBuilder.init(str, allocator);
-//
-//     builder.setHeaders(.node, 5);
-//     try testing.expect(builder.root.data[0] == 0);
-//     // key count is 2 bytes, we check them directly
-//     try testing.expect(builder.root.data[1] == 0);
-//     try testing.expect(builder.root.data[2] == 5);
-// }
-//
-test "appendKV" {
+test "building single node" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    const str = Storage.createInMemory(allocator, 512);
-    var builder = NodeBuilder.init(str, allocator);
+    const storage = Storage.createInMemory(allocator, 512);
+    var builder = NodeBuilder.init(storage, allocator);
 
     builder.setKind(.node);
 
     builder.appendKV(0, "hey", "val-longer");
 
-    const node = builder.build();
+    var node = builder.build();
 
-    std.debug.print("node: {s}\n", .{try node.to_string(allocator, str)});
-
+    try testing.expectEqual(1, node.key_count());
     try testing.expectEqualStrings("hey", node.get_key(0));
     try testing.expectEqual(3, node.get_key(0).len);
     try testing.expectEqualStrings("val-longer", node.get_value(0));
     try testing.expectEqual(10, node.get_value(0).len);
 
-    // builder.appendKV(1, 0, "next-key", "val-other");
-    // try testing.expectEqualStrings("hey", builder.root.get_key(0));
-    // try testing.expectEqualStrings("val-longer", builder.root.get_value(0));
-    // try testing.expectEqualStrings("next-key", builder.root.get_key(1));
-    // try testing.expectEqualStrings("val-other", builder.root.get_value(1));
-    //
-    // builder.appendKV(2, 0, "next-next-key", "val2");
-    // try testing.expectEqualStrings("hey", builder.root.get_key(0));
-    // try testing.expectEqualStrings("val-longer", builder.root.get_value(0));
-    // try testing.expectEqualStrings("next-key", builder.root.get_key(1));
-    // try testing.expectEqualStrings("val-other", builder.root.get_value(1));
-    // try testing.expectEqualStrings("next-next-key", builder.root.get_key(2));
-    // try testing.expectEqualStrings("val2", builder.root.get_value(2));
+    builder.appendKV(0, "hey-2", "val-2");
+    node = builder.build();
+    try testing.expectEqual(2, node.key_count());
+    try testing.expectEqualStrings("hey", node.get_key(0));
+    try testing.expectEqualStrings("val-longer", node.get_value(0));
+    try testing.expectEqualStrings("hey-2", node.get_key(1));
+    try testing.expectEqualStrings("val-2", node.get_value(1));
+
+    builder.appendKV(0, "hey-3", "val-3");
+    node = builder.build();
+    try testing.expectEqual(3, node.key_count());
+    try testing.expectEqualStrings("hey", node.get_key(0));
+    try testing.expectEqualStrings("val-longer", node.get_value(0));
+    try testing.expectEqualStrings("hey-2", node.get_key(1));
+    try testing.expectEqualStrings("val-2", node.get_value(1));
+    try testing.expectEqualStrings("hey-3", node.get_key(2));
+    try testing.expectEqualStrings("val-3", node.get_value(2));
 }
-//
-// test "setOffset" {
-//     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//     const allocator = gpa.allocator();
-//
-//     const str = Storage.createInMemory(allocator, 512);
-//     const builder = NodeBuilder.init(str, allocator);
-//
-//     builder.setHeaders(.leaf, 5);
-//     // TODO changing the key count changes to position of values in the array -> pretty sure this is causing bugs now
-//
-//     // won't set 0
-//     builder.setOffset(0, 101);
-//     try testing.expectEqual(0, builder.root.get_offset(0));
-//
-//     builder.setOffset(1, 101);
-//     try testing.expectEqual(101, builder.root.get_offset(1));
-//     builder.setOffset(2, 102);
-//     try testing.expectEqual(102, builder.root.get_offset(2));
-//     builder.setOffset(3, 103);
-//     try testing.expectEqual(103, builder.root.get_offset(3));
-// }
+
+test "building with child nodes" {
+    // todo
+}
